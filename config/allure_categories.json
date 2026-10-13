@@ -1,0 +1,17 @@
+[
+  {
+    "name": "Known application defects",
+    "matchedStatuses": ["skipped"],
+    "messageRegex": ".*XFAIL.*|.*xfail.*"
+  },
+  {
+    "name": "Assertion failures",
+    "matchedStatuses": ["failed"],
+    "traceRegex": ".*AssertionError.*"
+  },
+  {
+    "name": "Timeouts / app not responding",
+    "matchedStatuses": ["broken"],
+    "traceRegex": ".*TimeoutError.*"
+  }
+]

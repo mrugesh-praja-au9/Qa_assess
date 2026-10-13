@@ -15,7 +15,9 @@ Target site: https://parabank.parasoft.com/parabank/
 - **Test runner:** pytest, via the [pytest-playwright](https://github.com/microsoft/playwright-pytest)
   plugin (provides the per-test `page` fixture, and `--tracing` / `--video` /
   `--screenshot` capture on failure)
-- **Reporting:** pytest-html (self-contained HTML report) + a file/console logger
+- **Reporting:** [Allure](https://allurereport.org/) (rich interactive report with
+  step timelines, attachments, and failure screenshots) with pytest-html as a
+  zero-dependency fallback, plus a file/console logger
 - **Design pattern:** Page Object Model — one class per ParaBank page under `pages/`,
   with all locators and interactions encapsulated there; test files only orchestrate
   page objects and assert outcomes.
@@ -37,6 +39,15 @@ tests/            test_fund_transfer_audit.py - the scenario itself
 - Python 3.11+
 - Internet access to `parabank.parasoft.com` (this is Parasoft's public demo
   server; no local setup is needed)
+- **Optional, only for the Allure report:** a JRE (Java 8+) and the
+  [Allure commandline](https://allurereport.org/docs/install/). `pip install`
+  alone is enough to *collect* Allure's results (`reports/allure-results/`),
+  but turning them into the HTML report needs the Java-based CLI. The suite
+  runs and the pytest-html report works fine without either.
+  - Windows: `winget install EclipseAdoptium.Temurin.21.JRE` then
+    `npm install -g allure-commandline` (or `scoop install allure`)
+  - macOS: `brew install allure` (bundles its own JRE dependency via brew)
+  - Linux: see the Allure docs link above
 
 ## Setup
 
@@ -56,7 +67,8 @@ pytest
 ```
 
 This runs headless by default and writes:
-- `reports/report.html` — self-contained HTML test report
+- `reports/allure-results/` — raw Allure results (needs the Allure CLI to view, see below)
+- `reports/report.html` — self-contained pytest-html report (no extra tooling needed)
 - `logs/run_<timestamp>.log` — structured run log (also echoed to the console
   via `log_cli`)
 - `test-results/` — trace/video/screenshot artifacts, captured only for failing
@@ -69,6 +81,26 @@ pytest --headed                 # watch the browser
 pytest -k test_fund_transfer    # run a single test
 pytest --browser firefox        # cross-browser (chromium/firefox/webkit)
 ```
+
+### Viewing the Allure report
+
+Allure's HTML report fetches its data as JSON at runtime, so it must be served
+over HTTP, not opened as a raw `file://` path.
+
+```bash
+# One-shot: builds a static report/ and serves + opens it in your browser
+allure serve reports/allure-results
+
+# Or generate a static report you can keep/host, then open it
+allure generate reports/allure-results -o reports/allure-report --clean
+allure open reports/allure-report
+```
+
+The report includes: a pass/fail overview with the target URL/browser/Python
+version (from `environment.properties`), tests grouped by Epic → Feature →
+Story, a step-by-step timeline per test (register → open accounts → capture
+balances → transfer → verify activity) with account numbers and balances
+attached inline, and a screenshot automatically attached to any failing test.
 
 ## How the scenario maps to the tests
 
