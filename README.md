@@ -1,0 +1,147 @@
+# ParaBank Multi-Account Fund Transfer Audit
+
+QA Automation Practical Assessment — Scenario 6 (Dyad Technologies).
+
+Automates: registering a new ParaBank customer, opening two accounts, transferring
+funds between them, auditing before/after balances and transaction history, and
+exercising the over-limit (negative-path) transfer.
+
+Target site: https://parabank.parasoft.com/parabank/
+
+## Framework
+
+- **Language:** Python 3.11
+- **Browser automation:** [Playwright](https://playwright.dev/python/) (sync API)
+- **Test runner:** pytest, via the [pytest-playwright](https://github.com/microsoft/playwright-pytest)
+  plugin (provides the per-test `page` fixture, and `--tracing` / `--video` /
+  `--screenshot` capture on failure)
+- **Reporting:** pytest-html (self-contained HTML report) + a file/console logger
+- **Design pattern:** Page Object Model — one class per ParaBank page under `pages/`,
+  with all locators and interactions encapsulated there; test files only orchestrate
+  page objects and assert outcomes.
+
+### Project layout
+
+```
+config/           Base URL, timeouts, and scenario constants (transfer amount, etc.)
+pages/            Page objects: registration, accounts overview, open account,
+                   transfer funds, account activity
+utils/            Dynamic test-data generator and the shared logger
+conftest.py       bank_accounts fixture: registers a unique customer and opens
+                   two accounts (Setup phase, steps 1-2 of the scenario)
+tests/            test_fund_transfer_audit.py - the scenario itself
+```
+
+## Prerequisites
+
+- Python 3.11+
+- Internet access to `parabank.parasoft.com` (this is Parasoft's public demo
+  server; no local setup is needed)
+
+## Setup
+
+```bash
+python -m venv .venv
+.venv\Scripts\activate        # Windows
+# source .venv/bin/activate   # macOS/Linux
+
+pip install -r requirements.txt
+playwright install chromium
+```
+
+## Running the tests
+
+```bash
+pytest
+```
+
+This runs headless by default and writes:
+- `reports/report.html` — self-contained HTML test report
+- `logs/run_<timestamp>.log` — structured run log (also echoed to the console
+  via `log_cli`)
+- `test-results/` — trace/video/screenshot artifacts, captured only for failing
+  tests (see `pytest.ini`)
+
+Useful variations:
+
+```bash
+pytest --headed                 # watch the browser
+pytest -k test_fund_transfer    # run a single test
+pytest --browser firefox        # cross-browser (chromium/firefox/webkit)
+```
+
+## How the scenario maps to the tests
+
+`tests/test_fund_transfer_audit.py` has one test per validation-criteria group,
+so the mapping from requirement to assertion is traceable:
+
+| Validation Criteria | Test |
+| --- | --- |
+| 1. Two distinct account numbers are created | `test_setup_creates_two_distinct_accounts` |
+| 2. Balance calculations are accurate | `test_fund_transfer_updates_balances_and_records_transaction_history` |
+| 3. Transaction is recorded in both source and destination accounts | same |
+| 4. No duplicate transaction is created | same |
+| 5. Transfer reference appears only once | same |
+| 6. System handles invalid transfer gracefully | `test_transfer_exceeding_balance_does_not_crash_the_app` + `test_transfer_exceeding_balance_is_rejected` |
+
+Each test uses the `bank_accounts` fixture, which performs the Setup phase
+(steps 1-2: register a new user, open two new accounts) fresh for every test.
+That trades a few extra seconds of setup per test for full independence —
+every test can run alone, in any order, or in parallel, with no shared mutable
+state between them.
+
+Balance assertions are **delta-based** (`balance_after == balance_before -
+TRANSFER_AMOUNT`), not hardcoded absolute values, because each new ParaBank
+account starts from whatever balance the opening flow happens to leave it at
+(see Assumptions below) — the dynamic-data requirement in the brief.
+
+## Assumptions
+
+- **Account funding for the two new accounts.** ParaBank requires a minimum
+  $100 deposit from an *existing* account when opening a new one. The fixture
+  discovers the customer's original default account dynamically (via the
+  Accounts Overview page, not a hardcoded ID) and funds both new accounts
+  from it, so opening balances are whatever that flow produces rather than a
+  fixed number — balance assertions are written accordingly.
+- **"A specific amount (e.g., $250)"** — implemented literally as $250
+  (`config/settings.py:TRANSFER_AMOUNT`), configurable in one place.
+- **"An unrealistic amount"** for the negative-path step is computed as the
+  account's *current* live balance plus a large buffer (`$1,000,000`), read
+  dynamically rather than hardcoded, so it is always guaranteed to exceed
+  whatever the account's balance actually is at that point in the run.
+- **Transaction date matching** uses the server's displayed format
+  (`MM-DD-YYYY`, e.g. `10-13-2026`), generated via `datetime.now()` rather
+  than hardcoded, to match transactions made "today" during the test run.
+
+## Known issue found during automation (negative-path transfer)
+
+While automating the negative-path step (Workflow steps 10-11), the suite
+found that **ParaBank's demo backend does not validate a transfer amount
+against the source account's available balance**. Submitting a transfer far
+larger than the account's balance returns `Transfer Complete!` and leaves the
+source account with a large negative balance, instead of being rejected.
+
+This is a defect in the target demo application, not in the automation. It is
+captured as two separate tests rather than papered over:
+
+- `test_transfer_exceeding_balance_does_not_crash_the_app` — asserts the
+  resilience half of Validation 6: the app always resolves to a definite
+  success/error screen, never hangs or throws an unhandled error. This test
+  passes.
+- `test_transfer_exceeding_balance_is_rejected` — asserts the *intended*
+  business rule (an over-limit transfer should be rejected). It is marked
+  `@pytest.mark.xfail(strict=True)` with the defect explained inline, so the
+  suite documents the expected behaviour and will loudly fail (XPASS) if
+  ParaBank's backend is ever fixed to actually reject it — rather than
+  silently asserting the wrong thing is correct.
+
+## Notes on waits
+
+No `time.sleep()` / hardcoded waits anywhere. ParaBank's account balances and
+dropdown options are populated by asynchronous AJAX calls after page load, so
+page objects wait on the actual DOM condition that matters (a specific account
+row appearing, a `<select>`'s options being populated, a result/error panel
+becoming visible) rather than a fixed delay. See `pages/account_activity_page.py`
+for a case where a naive combined CSS selector picked the wrong element and had
+to be replaced with an explicit JS predicate — described in that file and in
+the corresponding commit.
