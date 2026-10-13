@@ -20,7 +20,16 @@ class AccountActivityPage(BasePage):
 
     def open(self, account_id: str) -> None:
         self.goto(f"activity.htm?id={account_id}")
-        self.page.locator(f"{self.TRANSACTION_ROWS}, {self.NO_TRANSACTIONS_MESSAGE}").first.wait_for(state="visible")
+        # #noTransactions is always present but hidden via inline style, so a
+        # single "first visible of either selector" locator can't express
+        # this OR - wait on the actual condition instead.
+        self.page.wait_for_function(
+            """() => {
+                const rows = document.querySelectorAll('#transactionTable tbody tr');
+                const noTx = document.getElementById('noTransactions');
+                return rows.length > 0 || (noTx && noTx.style.display !== 'none');
+            }"""
+        )
 
     def get_transactions(self) -> list[Transaction]:
         rows = self.page.locator(self.TRANSACTION_ROWS)
