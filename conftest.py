@@ -11,6 +11,7 @@ import pytest
 from playwright.sync_api import Browser, Page
 
 from config.settings import BASE_URL
+from pages.account_activity_page import AccountActivityPage
 from pages.accounts_overview_page import AccountsOverviewPage
 from pages.login_page import LoginPage
 from pages.open_account_page import AccountType, OpenAccountPage
@@ -28,6 +29,7 @@ class ProvisionedCustomer:
     customer: CustomerData
     account_a: str
     account_b: str
+    server_today: str
 
 
 @dataclass(frozen=True)
@@ -38,6 +40,7 @@ class BankAccounts:
     customer: CustomerData
     account_a: str
     account_b: str
+    server_today: str
 
 
 @pytest.fixture(scope="session")
@@ -77,8 +80,20 @@ def provisioned_customer(browser: Browser) -> ProvisionedCustomer:
         account_b = open_account_page.open_new_account(AccountType.SAVINGS, default_account_id)
         logger.info("Opened savings account B=%s", account_b)
 
+    with allure.step("[Session setup] Read the server's date from the funding transaction"):
+        # The ParaBank server's clock/timezone may not match this machine's,
+        # so "today" for matching transaction dates must come from the
+        # server's own output, not datetime.now(). Account A's $100 opening
+        # deposit (just created above) gives us exactly that.
+        activity_page = AccountActivityPage(page)
+        activity_page.open(account_a)
+        server_today = activity_page.get_transactions()[0].date
+        logger.info("Server-reported date for today's transactions: %s", server_today)
+
     context.close()
-    return ProvisionedCustomer(customer=customer, account_a=account_a, account_b=account_b)
+    return ProvisionedCustomer(
+        customer=customer, account_a=account_a, account_b=account_b, server_today=server_today
+    )
 
 
 @pytest.fixture
@@ -108,6 +123,7 @@ def bank_accounts(page: Page, provisioned_customer: ProvisionedCustomer) -> Bank
         customer=customer,
         account_a=provisioned_customer.account_a,
         account_b=provisioned_customer.account_b,
+        server_today=provisioned_customer.server_today,
     )
 
 

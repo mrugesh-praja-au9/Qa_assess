@@ -146,9 +146,13 @@ activity on the same accounts.
   account's *current* live balance plus a large buffer (`$1,000,000`), read
   dynamically rather than hardcoded, so it is always guaranteed to exceed
   whatever the account's balance actually is at that point in the run.
-- **Transaction date matching** uses the server's displayed format
-  (`MM-DD-YYYY`, e.g. `10-13-2026`), generated via `datetime.now()` rather
-  than hardcoded, to match transactions made "today" during the test run.
+- **Transaction date matching** reads the server's own date off the account's
+  $100 opening-deposit transaction (captured once in `provisioned_customer`)
+  rather than computing it from `datetime.now()`. The test machine's clock
+  and the ParaBank server's clock can be in different timezones — this was
+  caught live during development when the two disagreed right at a day
+  boundary (machine already on the 14th, server still reporting the 13th),
+  which failed every date-equality assertion until fixed this way.
 
 ## Known issue found during automation (negative-path transfer)
 

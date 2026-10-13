@@ -16,8 +16,6 @@ Criteria table so the mapping is traceable from requirement to assertion:
           ParaBank defect; see its docstring and the README)
 """
 
-from datetime import datetime
-
 import allure
 import pytest
 
@@ -65,7 +63,9 @@ def test_fund_transfer_updates_balances_and_records_transaction_history(bank_acc
     page = bank_accounts.page
     overview_page = AccountsOverviewPage(page)
     transfer_page = TransferFundsPage(page)
-    today = datetime.now().strftime("%m-%d-%Y")
+    # The server's own date, not datetime.now(): the ParaBank server's clock
+    # may be in a different timezone than whatever runs this suite.
+    today = bank_accounts.server_today
 
     with allure.step("Step 3: capture balances before transfer"):
         overview_page.open()
