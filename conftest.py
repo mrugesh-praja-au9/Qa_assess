@@ -8,10 +8,11 @@ from dataclasses import dataclass
 
 import allure
 import pytest
-from playwright.sync_api import Page
+from playwright.sync_api import Browser, Page
 
 from config.settings import BASE_URL
 from pages.accounts_overview_page import AccountsOverviewPage
+from pages.login_page import LoginPage
 from pages.open_account_page import AccountType, OpenAccountPage
 from pages.registration_page import RegistrationPage
 from utils.data_generator import CustomerData, generate_customer
@@ -21,8 +22,17 @@ logger = get_logger(__name__)
 
 
 @dataclass(frozen=True)
+class ProvisionedCustomer:
+    """The one customer + two accounts shared by every test in the run."""
+
+    customer: CustomerData
+    account_a: str
+    account_b: str
+
+
+@dataclass(frozen=True)
 class BankAccounts:
-    """Two freshly opened accounts belonging to one freshly registered customer."""
+    """The shared customer's accounts, bound to the current test's page."""
 
     page: Page
     customer: CustomerData
@@ -30,44 +40,75 @@ class BankAccounts:
     account_b: str
 
 
-@pytest.fixture
-def bank_accounts(page: Page) -> BankAccounts:
-    """Registers a unique customer and opens two accounts (checking + savings).
+@pytest.fixture(scope="session")
+def provisioned_customer(browser: Browser) -> ProvisionedCustomer:
+    """Registers a single customer and opens two accounts once for the whole
+    run, instead of re-registering a new customer for every test.
 
-    Scoped per-test on purpose: each test gets its own customer and accounts,
-    so tests stay independent of each other's state and execution order.
+    Runs in its own throwaway context so it doesn't interfere with the
+    per-test contexts/pages used afterwards.
     """
+    context = browser.new_context()
+    page = context.new_page()
     customer = generate_customer()
 
-    with allure.step(f"Register new customer '{customer.username}'"):
-        logger.info("Registering new customer username=%s", customer.username)
+    with allure.step(f"[Session setup] Register customer '{customer.username}'"):
+        logger.info("Registering shared customer username=%s", customer.username)
         registration_page = RegistrationPage(page)
         registration_page.open()
         registration_page.register(customer)
         assert registration_page.is_registration_successful(), "Registration did not confirm success"
 
-    with allure.step("Discover the customer's default account"):
+    with allure.step("[Session setup] Discover the customer's default account"):
         overview_page = AccountsOverviewPage(page)
         overview_page.open()
         default_account_id = overview_page.get_account_ids()[0]
         logger.info("Default account for %s is %s", customer.username, default_account_id)
-        allure.attach(default_account_id, name="Default account ID", attachment_type=allure.attachment_type.TEXT)
 
     open_account_page = OpenAccountPage(page)
 
-    with allure.step("Open a new CHECKING account (Account A)"):
+    with allure.step("[Session setup] Open a new CHECKING account (Account A)"):
         open_account_page.open()
         account_a = open_account_page.open_new_account(AccountType.CHECKING, default_account_id)
         logger.info("Opened checking account A=%s", account_a)
-        allure.attach(account_a, name="Account A (checking)", attachment_type=allure.attachment_type.TEXT)
 
-    with allure.step("Open a new SAVINGS account (Account B)"):
+    with allure.step("[Session setup] Open a new SAVINGS account (Account B)"):
         open_account_page.open()
         account_b = open_account_page.open_new_account(AccountType.SAVINGS, default_account_id)
         logger.info("Opened savings account B=%s", account_b)
-        allure.attach(account_b, name="Account B (savings)", attachment_type=allure.attachment_type.TEXT)
 
-    return BankAccounts(page=page, customer=customer, account_a=account_a, account_b=account_b)
+    context.close()
+    return ProvisionedCustomer(customer=customer, account_a=account_a, account_b=account_b)
+
+
+@pytest.fixture
+def bank_accounts(page: Page, provisioned_customer: ProvisionedCustomer) -> BankAccounts:
+    """Logs the shared customer into a fresh page for the current test.
+
+    Each test still gets its own browser context/page (so trace, video and
+    screenshot capture stay per-test), but reuses the one customer and two
+    accounts registered once in `provisioned_customer` instead of
+    registering a new user every time.
+    """
+    customer = provisioned_customer.customer
+
+    with allure.step(f"Log in as '{customer.username}'"):
+        login_page = LoginPage(page)
+        login_page.open()
+        login_page.login(customer.username, customer.password)
+        assert login_page.is_login_successful(), "Login did not confirm success"
+        allure.attach(
+            f"Account A: {provisioned_customer.account_a}\nAccount B: {provisioned_customer.account_b}",
+            name="Accounts under test",
+            attachment_type=allure.attachment_type.TEXT,
+        )
+
+    return BankAccounts(
+        page=page,
+        customer=customer,
+        account_a=provisioned_customer.account_a,
+        account_b=provisioned_customer.account_b,
+    )
 
 
 @pytest.fixture(scope="session", autouse=True)

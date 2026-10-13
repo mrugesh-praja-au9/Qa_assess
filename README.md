@@ -116,16 +116,21 @@ so the mapping from requirement to assertion is traceable:
 | 5. Transfer reference appears only once | same |
 | 6. System handles invalid transfer gracefully | `test_transfer_exceeding_balance_does_not_crash_the_app` + `test_transfer_exceeding_balance_is_rejected` |
 
-Each test uses the `bank_accounts` fixture, which performs the Setup phase
-(steps 1-2: register a new user, open two new accounts) fresh for every test.
-That trades a few extra seconds of setup per test for full independence —
-every test can run alone, in any order, or in parallel, with no shared mutable
-state between them.
+The Setup phase (steps 1-2: register a new user, open two new accounts) runs
+**once per test session**, not once per test — see the session-scoped
+`provisioned_customer` fixture in `conftest.py`. Every test then logs that
+same customer into its own fresh page via the function-scoped `bank_accounts`
+fixture, so tests still get isolated browser contexts (trace/video/screenshot
+capture stays per-test) without re-registering a brand-new ParaBank user for
+every single test.
 
 Balance assertions are **delta-based** (`balance_after == balance_before -
-TRANSFER_AMOUNT`), not hardcoded absolute values, because each new ParaBank
-account starts from whatever balance the opening flow happens to leave it at
-(see Assumptions below) — the dynamic-data requirement in the brief.
+TRANSFER_AMOUNT`), not hardcoded absolute values. This matters doubly now
+that accounts are shared across tests: balances carry over between tests
+(e.g. account A is already negative by the time the negative-path tests run),
+so any assertion based on an absolute starting balance would be wrong — only
+relative deltas are correct regardless of execution order or prior test
+activity on the same accounts.
 
 ## Assumptions
 
